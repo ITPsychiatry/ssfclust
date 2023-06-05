@@ -6,6 +6,21 @@
 \usage{
 update_memberships(X, V, F_, alpha, fun.distances)
 }
+\arguments{
+\item{X}{a matrix \emph{X} of dimension (N, p) containing predictor variables.}
+
+\item{V}{a prototypes matrix of dimension (C, p)}
+
+\item{F_}{the supervision  binary matrix of the same dimension as \emph{U}.}
+
+\item{alpha}{the scaling factor, a floating point > 0.}
+
+\item{fun.distances}{A function of two arguments: matrices X and V of the same
+number of columns.
+It should return a matrix of (nrow(X) x nrow(V)) of distances
+between each row of X and all rows of V.
+In case of Euclidean distance, the result should not be squared!}
+}
 \description{
 The trick is to use 3d arrays for efficient calculations.
 Let's take a D^2 matrix
