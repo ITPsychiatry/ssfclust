@@ -71,8 +71,7 @@ update_cluster_centers <-
     U,
     X,
     alpha=NULL,
-    F_=NULL #,
-    # h_indices=  [TODO: not needed? can calc from F_]
+    F_=NULL
   ) {
     if (is.null(alpha)) {
       V <-
@@ -82,7 +81,7 @@ update_cluster_centers <-
           colSums(U^2),
           "/"
         ))
-    } else {    # need to calculate $\Phi$
+    } else {
       UF <- alpha * (U-F_)^2
       i_indices <- which(rowSums(F_) != 0)
       j_indices <- 1:nrow(F_)
@@ -189,6 +188,24 @@ calculate_distances <-
 #' The vectorized operations on entire `D_nominator` and `D_denominator`
 #' follow the above logic.
 #'
+#' @param X
+#' a matrix *X* of dimension (N, p) containing predictor variables.
+#'
+#' @param V
+#' a prototypes matrix of dimension (C, p)
+#'
+#' @param F_
+#' the supervision  binary matrix of the same dimension as *U*.
+#'
+#' @param alpha
+#' the scaling factor, a floating point > 0.
+#'
+#' @param fun.distances
+#' A function of two arguments: matrices X and V of the same
+#' number of columns.
+#' It should return a matrix of (nrow(X) x nrow(V)) of distances
+#' between each row of X and all rows of V.
+#' In case of Euclidean distance, the result should not be squared!
 #'
 update_memberships <-
   function(
@@ -199,8 +216,7 @@ update_memberships <-
     fun.distances
   ) {
     D <- fun.distances(X, V)^2
-    # TODO we need a thorough mathematical description here
-    #
+
     D_nominator <- explode_dimension(D)
     D_denominator <- explode_dimension(D, byrow=TRUE)
 
@@ -282,7 +298,6 @@ SSFCM <- function(
     alpha=NULL,
     F_=NULL
 ) {
-
   # random U if not supplied
   if (is.null(U)) {
     U <- matrix(runif(nrow(X)*C), ncol=C)
@@ -291,7 +306,6 @@ SSFCM <- function(
   # normalize U
   U <- t(apply(U, 1, function(x) x / sum(x)))
 
-  # counter
   counter = 0
 
   # calculations loop
