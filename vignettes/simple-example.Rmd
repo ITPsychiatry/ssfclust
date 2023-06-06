@@ -1,0 +1,81 @@
+---
+title: "Simple example of using ssfclust"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Simple example of using ssfclust}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+## Overview
+
+This vignette shows a way to run Semi-Supervised Fuzzy C-Means model from
+`ssfclust` library using `ssfclust::SSFCM` function.
+
+## Reconstruction
+
+Let's read libraries we need and assure reproducibility.
+
+```{r setup}
+library(devtools)
+devtools::load_all(".")
+library(ssfclust)
+library(MASS)
+
+set.seed(42)
+```
+
+Simulate data from two classes, and sample the observation that will stay supervised.
+
+```{r}
+
+X <- rbind(
+  MASS::mvrnorm(50, mu=c(5, 8), Sigma=matrix(c(3, 0, 0, 3), ncol=2)),
+  MASS::mvrnorm(50, mu=c(7, 10), Sigma=matrix(c(3, 0, 0, 3), ncol=2))
+  )
+
+# simulate supervision for 10% of each class
+F_ <- matrix(0, nrow=100, ncol=2)
+F_[sample(1:50, 10), 1] <- 1
+F_[sample(51:100, 10), 2] <- 1
+```
+
+Run the unsupervised `model` and semi-supervised `model.ss`
+
+```{r}
+model <- SSFCM(X=X, C=2)
+model.ss <- SSFCM(X=X, C=2, alpha=1, F_=F_)
+```
+
+Apply the **arg max** rule for associating each observation with a single cluster only,
+check the accuracy of results obtained in such way.
+
+Note that in the unsupervised case, we need to check the results both way -
+associating first class with first cluster, and next associating first class
+with second cluster.
+
+```{r}
+acc.unsupervised.1 <- sum(apply(model$U, 1, which.max) == c(rep(1, 50), rep(2, 50)))
+acc.unsupervised.2 <- sum(apply(model$U, 1, which.max) == c(rep(2, 50), rep(1, 50)))
+acc.supervised <- sum(apply(model.ss$U, 1, which.max) == c(rep(1, 50), rep(2, 50)))
+```
+
+```{r}
+accs <- c(acc.unsupervised.1, acc.unsupervised.2, acc.supervised)
+strings <- c("unsupervised option 1", "unsupervised option 2", "semi-supervised")
+
+for (i in seq_along(accs)) {
+  print(paste0("Accuracy for ", strings[i], " is: ", accs[i], "%"))
+}
+```
+
+We observe that the semi-supervised model performed slightly better than the unsupervised one.
