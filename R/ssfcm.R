@@ -1,198 +1,79 @@
-#' Explode dimension of a 2d matrix to 3d array
+#' Creates DHE (stands for "distances horizontally exploded") and DVE
+#' (stands for "distances vertically exploded") matrices.
+#' See vignette `vectorized-equations` for more details.
 #'
-#' @description
-#' Turns a 2d matrix *A* of size *s* x *c* into a 3d array by replicating
-#' rows of the matrix *A* either vertically or horizontally.
+#' @param A Matrix of size N x c.
+#' @param vertical Boolean switch.
+#' If `TRUE`, create DVE (vertical explosion).
+#' If `FALSE`, create DHE (horizontal explosion).
 #'
-#' This function takes a matrix *A*
-#' ```
-#' A = [[a_11, ..., a_1c],
-#'      [... , ..., ... ]
-#'      [a_s1, ..., a_sc]]
-#' ```
-#'
-#' transforms each row `r` to form a separate 2d matrix *Ar*
-#' based on the `byrow` parameters, and returns a 3d array
-#' `[A1, ..., As]`.
-#'
-#' @param A
-#' a `matrix`.
-#'
-#' @param byrow
-#' states if the rows of the matrix should be replicated
-#' _vertically_ (`byrow=FALSE`)
-#' or _horizontally_ (`byrow=TRUE`).
-#' Note the default behaviour is to replicate _horizontally_.
-#'
-#' _vertical_ replication means each *Ar* looks like
-#' ```
-#' A_r = [[a_r1, ..., a_r1],
-#'        [... , ..., ... ],
-#'        [a_rc, ..., a_rc]],
-#' ```
-#' while _horizontal_ replication means each *Ar* looks like
-#' ```
-#' A_r = [[a_r1, ..., a_rc],
-#'        [... , ..., ... ],
-#'        [a_r1, ..., a_rc]].
-#' ```
-#'
-#' @return a 3d `array` with appropriately replicated rows.
+#' @return Matrix of size Nc x c
+#' @export
 #'
 #' @examples
-#' A <- matrix(c(1, 2, 3, 4), ncol=2)
-#' # > A
-#' #      [,1] [,2]
-#' # [1,]    1    3
-#' # [2,]    2    4
-#' B <- explode_dimension(A)
-#' # > B
-#' # , , 1
-#' #
-#' #      [,1] [,2]
-#' # [1,]    1    1
-#' # [2,]    3    3
-#' #
-#' # , , 2
-#' #
-#' #      [,1] [,2]
-#' # [1,]    2    2
-#' # [2,]    4    4
-explode_dimension <- function(A, byrow=FALSE) {
-  stopifnot(is.matrix(A))
-  apply(A, 1,
-        function(x) matrix(x, ncol(A), ncol(A), byrow=byrow), simplify=FALSE) |>
-    unlist() |>
-    array(dim=c(ncol(A), ncol(A), nrow(A)))
+#' A <- matrix(c(1, 2, 3, 4, 5, 6), ncol=2, byrow=TRUE)
+#' AVE <- dheve(A, vertical=TRUE)
+#' AHE <- dheve(A, vertical=FALSE)
+#'
+dheve <- function(A, vertical) {
+  if (vertical == TRUE) {
+    elements <- A[rep(1:nrow(A), each=ncol(A)), ]
+  } else {
+    elements <- matrix(c(t(A)))[, rep(1, ncol(A))]
+  }
+  return(elements)
 }
 
-update_cluster_centers <-
-  function(
-    U,
-    X,
-    alpha=NULL,
-    F_=NULL
-  ) {
-    if (is.null(alpha)) {
-      V <-
-        t(sweep(
-          t(X) %*% U^2,
-          2,
-          colSums(U^2),
-          "/"
-        ))
-    } else {
-      UF <- alpha * (U-F_)^2
-      i_indices <- which(rowSums(F_) != 0)
-      j_indices <- 1:nrow(F_)
-      h_indices <- setdiff(j_indices, i_indices)
-      UF[h_indices,] <- 0.
-      Phi <- U^2 + UF
+#' Aggregates elements of DHE and DVE matrices in a step to build
+#' evidence matrix E.
+#' See vignette `vectorized-equations` for details.
+#'
+#' @param dhe DHE matrix of size Nc x c.
+#' @param dve DVE matrix of size Nc x c.
+#'
+#' @return Matrix of size Nc x 1.
+#' @export
+#'
+gamma <- function(dhe, dve) {
+  1 / ((dhe/dve) %*% matrix(rep(1, ncol(dhe))))
+}
 
-      V <- t(sweep(
-        t(X) %*% Phi,
-        2,
-        colSums(Phi),
-        "/"
-      ))
-    }
+#' Rearranges elements of input matrix from a block matrix with vertical blocks
+#' (column vectors) to a block matrix with horizontal blocks (row vectors).
+#' See vignette `vectorized-equations` for details.
+#'
+#' @param A Matrix of size Nc x 1.
+#' @param c Number of columns in the wanted matrix.
+#' Associated with the number of clusters.
+#'
+#' @return Matrix of size N x c.
+#' @export
+#'
+phi <- function(A, c) {
+  matrix(A, ncol=c, byrow=TRUE)
+}
 
-    return(V)
-  }
+#' Calculates data evidence matrix E from distances matrix D.
+#'
+#' @param D Distances matrix of size N x c.
+#'
+#' @return Matrix of size N x c.
+#' @export
+#'
+calculate.evidence <- function(D) {
+  dve <- dheve(D, vertical=TRUE)
+  dhe <- dheve(D, vertical=FALSE)
+  phi(A=gamma(dhe, dve), c=ncol(dhe))
+}
 
-#' Calculating distances between two matrices
-#'
-#' A base R approach to calculate distances between
-#' rows of two matrices A and B that are of the same ncol.
-#'
-#' TODO it should be moved to tests to compare with other, externally
-#' imported methods because this function turned out to be very slow.
-#'
-#' @param X
-#' a matrix of dimension (N, p)
-#'
-#' @param V
-#' a matrix of dimension (C, p)
-#'
-#' @returns a matrix of dimension (N, C)
-#'
-calculate_distances <-
-  function(
-    X,
-    V
-  ) {
-    process_distance <- function(x, y) {
-      output <- as.matrix(dist(rbind(x, y)))
-      output[2:nrow(output), 1]
-    }
 
-    D_ <- apply(X, 1, function(x, y) process_distance(x, y), V, simplify=FALSE)
-    D <- t(do.call(cbind, D_))
-
-    return(D)
-  }
-
-#' Estimated U matrix with memberships
-#'
-#' The trick is to use 3d arrays for efficient calculations.
-#' Let's take a D^2 matrix
-#' ```
-#' D62 = [[5, 145],
-#'        [25, 85],
-#'        [61, 41]]
-#' ```
-#'
-#' `D_nominator` will be a 3d array of dimensions (2, 2, 3):
-#' it contains 3 matrices 2x2.
-#' Let's take a single 2x2 matrix from the array `D_nominator[,,1]`
-#' ```
-#'      [,1] [,2]
-#' [1,]    5    5
-#' [2,]  145  145
-#' ```
-#' It is effectively
-#' ```
-#'           [,1]      [,2]
-#' [1,]    d^2_11    d^2_11
-#' [2,]    d^2_12    d^2_12
-#' ```
-#' Let's now take `D_denominator[,,1]`
-#' ```
-#'      [,1] [,2]
-#' [1,]    5  145
-#' [2,]    5  145
-#' ```
-#' It is effectively
-#' ```
-#'           [,1]      [,2]
-#' [1,]    d^2_11    d^2_12
-#' [2,]    d^2_11    d^2_12
-#' ```
-#' If we now divide `D_nominator[,,1]` by `D_denominator[,,1]`, we get
-#' ```
-#'          [,1]     [,2]
-#' [1,]    5/5    5/145
-#' [2,]    145/5  145/145
-#' ```
-#' which is
-#'                  [,1]             [,2]
-#' [1,]    d^2_11/d^2_11    d^2_11/d^2_12
-#' [2,]    d^2_12/d^2_11    d^2_12/d^2_12
-#' The `rowSums` of the above will give us a vector
-#' ```
-#' [1] e_11 e_12
-#' ```
-#' *almost* the first row of evidence matrix, which is the inverse of the above
-#' i.e. a vector `[1] 1/e_11 1/e_12`.
-#'
-#' The vectorized operations on entire `D_nominator` and `D_denominator`
-#' follow the above logic.
+#' Estimated U matrix with memberships.
 #'
 #' @param X
 #' a matrix *X* of dimension (N, p) containing predictor variables.
 #'
 #' @param V
-#' a prototypes matrix of dimension (C, p)
+#' a prototypes matrix of dimension (c, p)
 #'
 #' @param F_
 #' the supervision  binary matrix of the same dimension as *U*.
@@ -207,34 +88,45 @@ calculate_distances <-
 #' between each row of X and all rows of V.
 #' In case of Euclidean distance, the result should not be squared!
 #'
-update_memberships <-
+estimate.U <-
   function(
     X,
     V,
     F_,
     alpha,
-    fun.distances
+    fun.distances,
+    i_indices
   ) {
     D <- fun.distances(X, V)^2
-
-    D_nominator <- explode_dimension(D)
-    D_denominator <- explode_dimension(D, byrow=TRUE)
-
-    E_reciprocal <- t(apply(D_nominator/D_denominator, c(3), rowSums))
-    E <- 1/E_reciprocal
+    E <- calculate.evidence(D)
 
     if (is.null(alpha)) {
       return(E)
     } else {
-      i_indices <- which(rowSums(F_) != 0)
       M <- matrix(1, nrow(F_), ncol(F_))
       M[i_indices, ] <- 1/(1+alpha)
 
-      ALB = F_*(alpha/(1+alpha))
+      F_alpha = F_*(alpha/(1+alpha))
 
-      return(M*E + ALB)
+      return(M*E + F_alpha)
     }
   }
+
+
+#' Equation to calculate clusters' prototypes matrix $\hat{V}$.
+#'
+#' @param Phi Matrix with weights of size N x c.
+#'
+#' @param X Matrix with predictors of size N x p.
+#'
+#' @return Clusters' prototypes matrix of size c x p.
+#' @export
+#'
+estimate.V <- function(Phi, X) {
+  Phi_tilde <- sweep(Phi, 2, colSums(Phi), "/")
+  return(t(t(X) %*% Phi_tilde))
+}
+
 
 #' Semi-Supervised Fuzzy C-Means model.
 #'
@@ -282,11 +174,11 @@ update_memberships <-
 #' F_[sample(51:100, 10), 2] <- 1
 #'
 #' model <- SSFCM(X=X, C=2)
-#' model.ss <- SSFCM(X=X, C=2, alpha=1, F_=F_)
+#' model_ss <- SSFCM(X=X, C=2, alpha=1, F_=F_)
 #'
-#' acc.unsupervised.1 <- sum(apply(model$U, 1, which.max) == c(rep(1, 50), rep(2, 50)))
-#' acc.unsupervised.2 <- sum(apply(model$U, 1, which.max) == c(rep(2, 50), rep(1, 50)))
-#' acc.supervised <- sum(apply(model.ss$U, 1, which.max) == c(rep(1, 50), rep(2, 50)))
+#' acc_unsupervised_1 <- sum(apply(model$U, 1, which.max) == c(rep(1, 50), rep(2, 50)))
+#' acc_unsupervised_2 <- sum(apply(model$U, 1, which.max) == c(rep(2, 50), rep(1, 50)))
+#' acc_supervised <- sum(apply(model_ss$U, 1, which.max) == c(rep(1, 50), rep(2, 50)))
 #'
 SSFCM <- function(
     X,
@@ -306,6 +198,14 @@ SSFCM <- function(
   # normalize U
   U <- t(apply(U, 1, function(x) x / sum(x)))
 
+  # indices for SSFCM
+  if (is.null(alpha)) {
+    i_indices <- NA
+  } else {
+    i_indices <- which(rowSums(F_) != 0)
+    h_indices <- which(rowSums(F_) == 0)
+  }
+
   counter = 0
 
   # calculations loop
@@ -313,18 +213,24 @@ SSFCM <- function(
     counter <- counter + 1
     U_previous_iter <- U
 
-    V <- update_cluster_centers(
-      U=U_previous_iter,
-      X=X,
-      alpha=alpha,
-      F_=F_)
+    Phi <- U_previous_iter^2
 
-    U <- update_memberships(
+    # modify Phi if running SSFCM
+    if (!is.null(alpha)) {
+      U_alpha <- alpha * (U_previous_iter - F_)^2
+      U_alpha[h_indices, ] <- 0
+      Phi <- Phi + U_alpha
+    }
+
+    V <- estimate.V(Phi, X)
+
+    U <- estimate.U(
       X=X,
       V=V,
       F_=F_,
       alpha=alpha,
-      fun.distances=fun.distances)
+      fun.distances=fun.distances,
+      i_indices=i_indices)
 
     conv_iter <- base::norm(U - U_previous_iter, type="F")
 
