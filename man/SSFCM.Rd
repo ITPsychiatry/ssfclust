@@ -52,10 +52,10 @@ F_[sample(1:50, 10), 1] <- 1
 F_[sample(51:100, 10), 2] <- 1
 
 model <- SSFCM(X=X, C=2)
-model.ss <- SSFCM(X=X, C=2, alpha=1, F_=F_)
+model_ss <- SSFCM(X=X, C=2, alpha=1, F_=F_)
 
-acc.unsupervised.1 <- sum(apply(model$U, 1, which.max) == c(rep(1, 50), rep(2, 50)))
-acc.unsupervised.2 <- sum(apply(model$U, 1, which.max) == c(rep(2, 50), rep(1, 50)))
-acc.supervised <- sum(apply(model.ss$U, 1, which.max) == c(rep(1, 50), rep(2, 50)))
+acc_unsupervised_1 <- sum(apply(model$U, 1, which.max) == c(rep(1, 50), rep(2, 50)))
+acc_unsupervised_2 <- sum(apply(model$U, 1, which.max) == c(rep(2, 50), rep(1, 50)))
+acc_supervised <- sum(apply(model_ss$U, 1, which.max) == c(rep(1, 50), rep(2, 50)))
 
 }
