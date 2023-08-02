@@ -1,0 +1,818 @@
+---
+title: "Vectorized equations for optimal memberships and prototypes"
+output: 
+  rmarkdown::html_vignette:
+    number_sections: true
+vignette: >
+  %\VignetteIndexEntry{Vectorized equations for optimal memberships and prototypes}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  #fig.width=12, fig.height=8
+  fig.width=6, fig.height=4
+)
+```
+
+```{r setup}
+library(ssfclust)
+library(ggplot2)
+```
+
+# Introduction
+
+## The objective function and optimization procedure
+
+In the majority of literature, the iterative optimization algorithm used to
+solve the optimization problem of semi-supervised fuzzy clustering is presented
+on the level of individual memberships $\hat{u}_{jk} \in \mathrm{R}$ of $j$th observation to $k$th cluster,
+or equivalently - on the level of individual cluster's prototype $\hat{v}_k \in \mathrm{R}^p$.
+
+This approach has its root in the algorithm proposed in **CITE BEZDEK**.
+Since optimizing the objective function $J(U, V)$ of memberships and prototypes matrices $U$ and $V$
+turns out to be NP-hard, the algorithm is proposed to update iteratively solutions of $J(U;V)$ and
+$J(V;U)$ until reaching a pre-defined *convergence criterion* (i.e., when a difference between
+two consecutive $\hat{U}^\text{current}$ and $\hat{U}^\text{previous}$ measured by a given
+matrix norm is negligible).
+This approach is proved to converge either to a local minimum or to a saddle point
+**CITE THIS RESULT**.
+
+Interestingly, modifications of the objective function that preserve some characteristics of the $J_\text{FCM}$
+analyzed in **CITE BEZDEK** share the convergence analysis results.
+Many models proposed in the literature modify $J_\text{FCM}$ in the way to preserve these characteristics -
+including Semi-Supervised Fuzzy C-Means.
+
+## Equations for $\hat{u}_{jk}$, $\hat{v}_k$
+
+It is not a trivial result in Fuzzy C-Means (and, correspondingly, in SSFCMeans)
+that one can analytically derive the equation of optimal memberships on the level
+of individual membership of $j$th observation to $k$th cluster.
+On the contrary, having the equation for optimal prostotype on the level of
+individual cluster is rather trivial as clusters are by design assumed to be independent.
+
+Probably because of that, **majority of literature presents the algorithm on the individual level**
+of $\hat{u}_{jk}$ and $\hat{v}_k$.
+Such presentations -- while being mathematically plausible -- are not efficient
+when it comes to thinking of programming the algorithm.
+In particular, one would like to take full advantage of so-called *vectorization*
+(**PROVIDE A REFERENCE**) - a cornerstone of efficient programming in modern high-level
+programming languages, including R.
+
+Therefore, in this R package and vignette, we present vectorized update rules for
+the entirety of $\hat{U}$ and $\hat{V}$ both mathematically and programmatically.
+
+# $\hat{U}_\text{FCM}$ and $\hat{U}_\text{SSFCM}$
+
+$$
+\begin{equation}
+\tag{1}
+\hat{u}_{jk}^\text{FCM} = 
+\frac{
+    1
+}
+{
+\sum_{g=1}^c
+( d^2_{jk} / d^2_{jg} )
+}
+\end{equation},
+$$
+where the $d^2_{jk}$ and more generally $d^2_{jg},\:g=1,\ldots,c$ are the elements
+of the distance matrix $D$ that is calculated before updating memberships.
+
+The equation for $\hat{u_{jk}^\text{SSFCM}}$ is more complicated:
+
+$$
+\begin{equation}
+\tag{2}
+\hat{u}_{jk}^\text{SSFCM} =
+    \frac{
+        1 + \alpha
+        \cdot 
+        \big( 1 - b_j \cdot \sum_{g=1}^{c} f_{jg} \big)
+    }{
+        1 + \alpha
+    }  
+    \cdot
+        \frac{
+            1
+        }{
+            \sum_{g=1}^{c} 
+            \big( {d_{jk}^2} / {d_{jg}^2} \big)
+        }
+    
+    +
+    \frac{\alpha}{1+\alpha}
+    \cdot 
+    \big(
+    f_{jk} \cdot b_j
+    \big)
+    .
+\end{equation}
+$$
+
+## Sample distances matrix $D$
+
+In this vignette, we will use a simple $D$ matrix to illustrate our considerations.
+
+$$
+\begin{equation}
+D=
+\begin{pmatrix}
+5 & 145 \\
+25 & 85 \\
+61 & 41
+\end{pmatrix}
+\end{equation}
+$$
+
+```{r}
+D = matrix(c(5, 145, 25, 85, 61, 41), ncol=2, byrow=TRUE)
+D
+```
+
+## data evidence $e_{jk}$
+
+One can clearly see both Eq.(1) and Eq.(2) have a common element that we call
+*data evidence* $e_{jk}$:
+
+$$
+\begin{equation}
+\tag{3}
+e_{jk} = 
+  \frac{
+      1
+  }{
+      \sum_{g=1}^{c} 
+      \big( {d_{jk}^2} / {d_{jg}^2} \big)
+  }
+=
+\Big(
+      \sum_{g=1}^{c} 
+      \big( {d_{jk}^2} / {d_{jg}^2} \big)
+\Big)^{-1}
+=
+\Big(
+\frac{
+d^2_{jk}
+}{
+d^2_{j1}
+}
++
+\frac{
+d^2_{jk}
+}{
+d^2_{j1}
+}
++
+\ldots
++
+\frac{
+d^2_{jk}
+}{
+d^2_{jc}
+}
+\Big)^{-1}.
+\end{equation}
+$$
+
+In case of Fuzzy C-Means, $\hat{u}_{jk} = e_{jk}$ simply, but for SSFCMeans (and many other semi-supervised
+fuzzy clustering models) data evidence $e_{jk}$ is just a part of the bigger equation.
+
+**However, it is the data evidence that is computationally costly and its calculation
+should be optimized**.
+
+## Baseline
+
+The baseline algorithm for calculating $e_{jk}$ is just to use two `for` loops:
+
+```{r}
+evidence.for.loop <- function(D) {
+  N <- nrow(D)
+  c <- ncol(D)
+  E <- matrix(NA, nrow=N, ncol=c)
+  
+  for (j in 1:N) {
+    row <- D[j,]
+    for (k in 1:c) {
+      E[j, k] <- 1 / sum(D[j, k] / row)
+    }
+  }
+  
+  return(E)
+}
+```
+
+## Vectorized algorithm
+
+The main idea is to avoid `for` loops by smart construction of special matrices for all observations at the same time, performing the operations of division and summation in a vectorized way, and aggregating the results to form a matrix $E = (e_{jk})$.
+
+Let's take a look at the first row of $D$, namely $D_{1.} = (d_{11}=5, d_{12}=145)$.
+Let us define two special matrices $HE(D_{1.}) = HE$ (stands for *horizontal extrapolation*) and $VE(D_{1.}) = VE$ (stands for *vertical extrapolation*):
+
+$$
+HE = \begin{pmatrix}
+d_{11}=5 & d_{11}=5 \\
+d_{12}=145 & d_{12}=145
+\end{pmatrix},
+\:
+VE = 
+\begin{pmatrix}
+d_{11}=5 & d_{12}=145 \\
+d_{11}=5 & d_{12}=145
+\end{pmatrix}.
+$$
+
+If we now apply Hadamard division $\oslash$, we get
+
+$$
+HE \oslash VE = 
+\begin{pmatrix}
+\frac{d_{11}}{d_{11}} & \frac{d_{11}}{d_{12}} \\
+\frac{d_{12}}{d_{11}} & \frac{d_{12}}{d_{12}} \\
+\end{pmatrix}
+$$
+
+By multiplying the resulting $2 \times 2$ matrix by matrix composed of the unit vector $\mathbf{1} = (1, 1)^T$,
+we obtain
+
+$$
+(HE \oslash VE) \mathbf{1} =
+\begin{pmatrix}
+\frac{d_{11}}{d_{11}} + \frac{d_{11}}{d_{12}} \\
+\frac{d_{12}}{d_{11}} + \frac{d_{12}}{d_{12}} \\
+\end{pmatrix}
+=
+\begin{pmatrix}
+e_{11}^{-1} \\ e_{12}^{-1}
+\end{pmatrix}.
+$$
+
+Note that we now *almost* have a first row of the data evidence matrix $E_{1.}$!
+Treating the (column) vectors as matrices with one column, we apply Hadamard division and get
+
+$$
+\bigg[
+\mathbf{1} \oslash 
+\begin{pmatrix}
+e_{11}^{-1} \\ e_{12}^{-1}
+\end{pmatrix}
+\bigg]^T =
+(e_{11}, e_{12}) = E_{1.} \:.
+$$
+
+### Formalizaing the calculations
+
+Let $D = [d^2_{jk}]$ be a distances matrix, $j=1,\ldots,N;\:k=1,\ldots,c$.
+
+Let $D_{j.}$ be an arbitrary row vector of length $c$ containing distances between $j$th observation and all prototypes.
+A function $HE: D_{j.} \mapsto \mathrm{R}^{c \times c}$ is defined such that
+$$
+\begin{equation}
+HE(D_{j.}) = 
+\begin{pmatrix}
+d_{j1} \: \cdots \: d_{j1} \\
+\vdots \: \ddots \: \vdots \\
+d_{jc} \: \dots \: d_{jc}
+\end{pmatrix}
+\end{equation}
+$$
+Similarly, a function $VE: D_{j.} \mapsto \mathrm{R}^{c\times c}$ is defined such that
+$$
+\begin{equation}
+VE(D_{j.}) = 
+\begin{pmatrix}
+d_{j1} \: \cdots \: d_{jc} \\
+\vdots \: \ddots \: \vdots \\
+d_{j1} \: \dots \: d_{jc}
+\end{pmatrix}
+\end{equation}
+$$
+
+The $HE$ and $VE$ functions are implemented in our package in `dheve` function.
+
+
+To treat all the rows of $D$ *simultaneously*, let us define matrices
+
+$$
+\mathrm{R}^{Nc \: \times \: c} \ni \mathbf{DHE} = 
+\begin{pmatrix}
+HE(D_{1.}) \\
+HE(D_{2.}) \\
+\vdots \\
+HE(D_{N.})
+\end{pmatrix}
+$$
+and
+
+$$
+\mathrm{R}^{Nc \: \times \: c} \ni \mathbf{DVE} = 
+\begin{pmatrix}
+VE(D_{1.}) \\
+VE(D_{2.}) \\
+\vdots \\
+VE(D_{N.})
+\end{pmatrix}
+$$
+
+We use one function `dheve` to calculate either $\mathbf{DHE}$ or $\mathbf{DVE}$:
+
+```{r}
+dheve <- function(A, vertical) {
+  if (vertical == TRUE) {
+    elements <- A[rep(1:nrow(A), each=ncol(A)), ]
+  } else {
+    elements <- matrix(c(t(A)))[, rep(1, ncol(A))]
+  }
+  return(elements)
+}
+```
+
+
+Apply function $\gamma$
+
+$$
+\Gamma = \gamma(\mathbf{DHE}, \mathbf{DVE}) =
+\mathbf{1} 
+\oslash 
+\Big(
+[\mathbf{DHE} \oslash \mathbf{DVE}] 
+\mathbf{1}
+\Big)
+=
+\begin{pmatrix}
+E_{1.}^T \\
+E_{2.}^T \\
+\vdots \\
+E_{N.}^T
+\end{pmatrix} \in \mathrm{R}^{Nc \: \times \: 1}
+$$
+```{r}
+gamma <- function(dhe, dve) {
+  1 / ((dhe/dve) %*% matrix(rep(1, ncol(dhe))))
+}
+```
+
+We then only need a function $\phi: \mathrm{R}^{Nc \: \times \: 1} \mapsto \mathrm{R}^{N \times c}$ to rearrange $\Gamma$:
+
+$$
+\phi \Big(
+\begin{pmatrix}
+E_{1.}^T \\
+E_{2.}^T \\
+\vdots \\
+E_{N.}^T
+\end{pmatrix}
+\Big)
+=
+\begin{pmatrix}
+E_{1.} \\
+E_{2.} \\
+\vdots \\
+E_{N.}
+\end{pmatrix}
+$$
+```{r}
+phi <- function(A, c) {
+  matrix(A, ncol=c, byrow=TRUE)
+}
+```
+
+The final algorithm is:
+
+```{r}
+evidence.vectorized <- function(D) {
+  dve <- dheve(D, vertical=TRUE)
+  dhe <- dheve(D, vertical=FALSE)
+  Gamma <- gamma(dhe, dve)
+  phi(Gamma, c=ncol(dhe))
+}
+```
+
+## Comparison of `evidence.for.loop` and `evidence.vectorized`
+
+```{r}
+evidence.for.loop(D)
+```
+
+```{r}
+evidence.vectorized(D)
+```
+
+## The vectorized $\hat{U}_\text{SSFCM}$
+
+The function `evidence.vectorized(D)` calculates vectorized data evidence, but Eq.(2) is more than that.
+Let us split it into 3 parts A, B, and C.
+
+$$
+\begin{equation}
+\hat{u}_{jk}^\text{SSFCM} =
+\underbrace{
+    \frac{
+        1 + \alpha
+        \cdot 
+        \big( 1 - b_j \cdot \sum_{g=1}^{c} f_{jg} \big)
+    }{
+        1 + \alpha
+    } 
+}_{\text{part A}}
+    \cdot
+\underbrace{
+        \frac{
+            1
+        }{
+            \sum_{g=1}^{c} 
+            \big( {d_{jk}^2} / {d_{jg}^2} \big)
+        }
+}_\text{part B}
+    +
+\underbrace{
+    \frac{\alpha}{1+\alpha}
+    \cdot 
+    \big(
+    f_{jk} \cdot b_j
+    \big)
+}_\text{part C}
+    .
+\end{equation}
+$$
+
+### Part A
+
+Let $h$ denote an unsupervised observation.
+Then, $b_h = 0$ and $\sum_{g=1}^c f_{hg} = 0$ as well.
+Thus, the part A individual equation reduces to
+
+$$
+\frac{1 + \alpha \cdot (1 - 0 \cdot 0)}{1+\alpha} =
+\frac{1 + \alpha}{1 + \alpha} = 1.
+$$
+
+Let $i$ denote a supervised observation.
+Then, $b_i = 1$ and $\sum_{g=1}^c f_{ig} = 1$ as well.
+Thus, the part A individual equation reduces to
+
+$$
+\frac{1 + \alpha \cdot (1 - 1 \cdot 1)}{1 + \alpha} = 
+\frac{1 + \alpha \cdot 0}{1 + \alpha} = \frac{1}{1 + \alpha}.
+$$
+
+The vectorized form is as follows.
+
+Let $\mathbf{I} = (1)$ be a matrix of $N \times c$ dimension.
+Let $H$ be a set of the indices of supervised observations.
+To create matrix $M$ encoding Part A of Eq.(2), one needs to update rows in matrix $\mathbf{I}$
+corresponding to indices from $H$ set with row vectors $\eta = (\frac{1}{1+\alpha}, \ldots, \frac{1}{1+\alpha})$ of length $c$:
+
+$$
+\text{step 1: }M \leftarrow \mathbf{I} \\
+\text{step 2: }M_{h.} \leftarrow \eta \quad \forall h \in H
+$$
+
+### Part B
+
+The `evidence.vectorized` function handles part B.
+
+### Part C
+
+This part is trivial.
+Matrix $F = (f_{jk})$ is a binary matrix of dimension $N \times c$ such that
+$f_{jk} = 1$ iff $j$th observations is known to belong to $k$th class.
+We denote the matrix $F_\alpha$ as matrix $F$ multiplied element-wise by scalar
+$\frac{\alpha}{1+\alpha}$.
+
+### Final formula
+
+Let $\odot$ be Hadamard product. Then
+
+$$
+\begin{equation}
+\hat{U}_\text{SSFCM} = M \odot E + F_\alpha.
+\end{equation}
+$$
+
+## The vectorized $\hat{U}_\text{FCM}$
+
+$$
+\begin{equation}
+\hat{U}_\text{FCM} = E.
+\end{equation}
+$$
+
+# $\hat{V}_\text{FCM}$ and $\hat{V}_\text{SSFCM}$
+
+$$
+\begin{equation}
+\mathrm{R}^p \ni 
+\hat{\mathbf{v}}_k^\text{FCM} = 
+\frac{
+\sum_{j=1}^N u^2_{jk} \cdot \mathbf{x}_j
+}{
+\sum_{j=1}^N u^2_{jk} 
+},
+\end{equation}
+$$
+where $\mathbf{x}_j \in \mathrm{R}^p$ is a vector containing values of predictors for $j$th observation.
+
+For SSFCMeans,
+
+$$
+\begin{equation}
+\hat{\mathbf{v}}_k^\text{SSFCM} = 
+\frac{
+    \sum_{j=1}^N \bigg(
+        u^2_{jk} + b_j  \alpha  {(u_{jk} - f_{jk})}^2
+    \bigg)
+    \cdot \mathbf{x}_j
+}{
+    \sum_{j=1}^N \bigg(
+        u^2_{jk} + b_j  \alpha  {(u_{jk} - f_{jk})}^2
+    \bigg)    
+}
+.
+\end{equation}
+$$
+
+A generalized, common notation consists of using a weight $\phi_{jk}$
+
+$$
+\begin{equation}
+\tag{91}
+\hat{\mathbf{v}}_k = 
+\frac{
+  \sum_{j=1}^N \phi_{jk} \cdot  \mathbf{x}_j
+}{
+\sum_{j=1}^N \phi_{jk}
+} 
+\end{equation}.
+$$
+In case of FCM, $\phi_{jk} = \hat{u}_{jk}$, whereas for SSFCMeans
+$\phi_{jk} = \hat{u}^2_{jk} + b_j \cdot \alpha \cdot (u_{jk} - f_{jk})^2$.
+
+Let us now rewrite Eq.(91) to simplify discussion.
+Note that
+
+$$
+\begin{equation}
+\tag{92}
+\hat{v}_k = 
+\frac{
+  \sum_{j=1}^N \phi_{jk} \cdot  \mathbf{x}_j
+}{
+\sum_{j=1}^N \phi_{jk}
+} 
+=
+\sum_{j=1}^N \Big(
+  \frac{\phi_{jk}}{\sum_{j=1}^N \phi_{jk}}
+  \cdot \mathbf{x}_j
+\Big)
+=
+\sum_{j=1}^N \tilde{\phi}_{jk} \cdot \mathbf{x}_j
+.
+\end{equation}
+$$
+Eq.(92) shows us clearly that prototypes are created by multiplying predictors (formally: column vectors)
+$\mathbf{x}_j$ by **relative weights** (formally: scalars) $\tilde{\phi}_{jk} = \frac{\phi_{jk}}{\sum_{j=1}^N \phi_{jk}}.$
+
+## Vectorization
+
+Let us rewrite Eq.(92):
+
+$$
+\begin{equation}
+\tag{93}
+\hat{\mathbf{v}_k} = 
+\sum_{j=1}^N \tilde{\phi}_{jk} \cdot \mathbf{x}_j
+=
+\sum_{j=1}^N
+\Bigg(
+\begin{bmatrix}
+\tilde{\phi}_{jk} \\
+\vdots \\
+\tilde{\phi}_{jk}
+\end{bmatrix}
+\odot
+\begin{bmatrix}
+x_{j1} \\
+\vdots \\
+x_{jp}
+\end{bmatrix}
+\Bigg)
+=
+\sum_{j=1}^N
+\Bigg(
+\begin{bmatrix}
+\tilde{\phi}_{jk} \cdot x_{j1} \\
+\vdots \\
+\tilde{\phi}_{jk} \cdot x_{jp} \\
+\end{bmatrix}
+\Bigg)
+=
+\begin{bmatrix}
+\sum_{j=1}^N \tilde{\phi}_{jk} \cdot x_{j1} \\
+\vdots \\
+\sum_{j=1}^N \tilde{\phi}_{jk} \cdot x_{jp}
+\end{bmatrix}.
+\end{equation}
+$$
+
+Note that we can rewrite Eq.(93) in a matrix form.
+Let $\tilde{\Phi_k}$ be a column vector of length $N$ such that $\tilde{\Phi_k} = (\tilde{\phi}_{1k}, \ldots, \tilde{\phi}_{Nk})$.
+
+Then
+
+$$
+\begin{equation}
+\tag{94}
+\hat{\mathbf{v}}_k = X^T \tilde{\Phi}_k.
+\end{equation}
+$$
+
+Indeed,
+
+$$
+X^T = 
+\begin{pmatrix}
+x_{11} & x_{21} & \ldots & x_{N1} \\
+x_{12} & x_{22} & \ldots & x_{N2} \\
+\vdots & \vdots & \vdots & \vdots \\
+x_{1p} & x_{2p} & \ldots & x_{Np}
+\end{pmatrix},
+$$
+
+and
+
+$$
+\begin{equation}
+X^T \tilde{\Phi}_k =
+\begin{pmatrix}
+x_{11} & x_{21} & \ldots & x_{N1} \\
+x_{12} & x_{22} & \ldots & x_{N2} \\
+\vdots & \vdots & \vdots & \vdots \\
+x_{1p} & x_{2p} & \ldots & x_{Np}
+\end{pmatrix}
+\begin{pmatrix}
+\tilde{\phi_{1k}} \\ \tilde{\phi}_{2k} \\ \vdots \\ \tilde{\phi}_{Nk}
+\end{pmatrix}
+=
+\begin{pmatrix}
+\sum_{j=1}^N \tilde{\phi}_{jk} \cdot x_{j1} \\
+\vdots \\
+\sum_{j=1}^N \tilde{\phi}_{jk} \cdot x_{jp}
+\end{pmatrix}.
+\end{equation}
+$$
+
+## Equation for matrix $\hat{V}$
+
+Using Eq.(94), one can easily provide a formula for the whole prototypes matrix $\hat{V}$ instead of a single prototype $\hat{\mathbf{v}}_k$:
+
+
+
+$$
+\begin{equation}
+\tag{81}
+\mathrm{R}^{c \times p} \ni
+\hat{V} = \big(X^T \tilde{\Phi}\big)^T
+\end{equation},
+$$
+
+where $\Phi$ is a block matrix given by a following equation:
+
+$$
+\tilde{\Phi} = \sum_{k=1}^c e_k^T \otimes \tilde{\Phi}_k,
+$$
+where $\{e_k\}$ are standard basis vectors, and $\otimes$ is a Kronecker product
+(see [this stackoverflow for notation inspiration](https://math.stackexchange.com/questions/4568964/standard-notation-operator-to-stacking-block-matrices)).
+
+Note that in Eq.(81) we want to transpose $X^T \tilde{\Phi}$ to obtain matrix $\hat{V} \in \mathrm{R}^{c \times p}$
+of the same number of columns as matrix $X \in \mathrm{R}^{N \times p}$.
+This will allow calculating distances between each observation and each cluster efficiently
+(this topic is not covered in this vignette; it refers to how distances matrix $D$ is created - in this
+vignette we take it for granted).
+
+## How to calculate relative weights $\tilde{\Phi}$?
+
+### mathematics
+
+First, let $\Phi$ be a matrix
+
+$$
+\Phi = 
+\begin{pmatrix}
+\phi_{11} & \phi_{12} & \ldots & \phi_{1c} \\
+\phi_{21} & \phi_{22} & \ldots & \phi_{2c} \\
+\ldots    & \ldots    & \ldots & \ldots    \\
+\phi_{N1} & \phi_{N2} & \ldots & \phi_{Nc}
+\end{pmatrix}.
+$$
+
+Next, create a function $\sigma: \mathrm{R}^{N \times c} \mapsto \mathrm{R}^{N \times c}$ such that
+
+$$
+\sigma(\Phi) =
+\begin{pmatrix}
+  \sum_{j=1}^N \phi_{j1} &
+  \sum_{j=1}^N \phi_{j2} &
+  \ldots &
+  \sum_{j=1}^N \phi_{jc} &
+\\
+  \sum_{j=1}^N \phi_{j1} &
+  \sum_{j=1}^N \phi_{j2} &
+  \ldots &
+  \sum_{j=1}^N \phi_{jc} &
+\\
+\ldots    & \ldots    & \ldots & \ldots    \\
+  \sum_{j=1}^N \phi_{j1} &
+  \sum_{j=1}^N \phi_{j2} &
+  \ldots &
+  \sum_{j=1}^N \phi_{jc} &.
+\end{pmatrix}
+$$
+
+Function $\sigma$ creates a matrix of the same dimension as $\Phi$, but each $k$th column
+is composed of repeated value: a sum of entries $\phi_{jk}$ from this $k$th column in matrix $\Phi$.
+
+
+Then, to obtain $\tilde{\Phi}$, one needs to apply Hadamard division:
+
+$$
+\tilde{\Phi} =
+\Phi \oslash \sigma(\Phi).
+$$
+
+### implementation in R
+
+We can use `base::sweep` function to *sweep out the statistic over input array*.
+Note that the `/` function applies Hadamard division, and broadcasting **PROVIDE REFS**
+handles calculations by `STATS=colSums(Phi)` that works as -- mathematically -- using function $\sigma(\Phi)$.
+
+```{r}
+tilde.phi <- function(Phi) {
+  sweep(Phi, MARGIN=2, STATS=colSums(Phi), FUN="/")
+}
+```
+
+Example:
+
+```{r}
+matrix_example <- matrix(c(5, 5, 10, 1, 1, 3), ncol=2)
+
+print("example matrix")
+print(matrix_example)
+print("example matrix trated by tilde.phi")
+tilde.phi(matrix_example) |> print()
+```
+
+*In fact, we are normalizing the input matrix by columns.* Other interesting R ways to do it
+[are listed e.g. in this stackoverflow](https://stats.stackexchange.com/questions/8605/column-wise-matrix-normalization-in-r).
+
+## Calculating $\Phi$ for SSFCMeans
+
+Recall that for Semi-Supervised Fuzzy C-means,
+$$
+\phi_{jk} = 
+\underbrace{u^2_{jk}}_\text{A} + 
+\underbrace{b_j}_\text{B} 
+\cdot 
+\underbrace{\alpha \cdot (u_{jk} - f_{jk})^2}_\text{C}.
+$$
+
+### Part A
+
+It is straightforward - just matrix $U$.
+
+### Part C
+
+It is also straightforward: let matrix $U_\alpha$ be a matrix $(U-F)^2$
+multiplied by scalar $\alpha$.
+
+### Part B
+
+This part consists of creating matrix $U_\alpha^0$, where rows from matrix $U_\alpha$
+corresponding to unsupervised observations were replaced with zero row vectors $\mathbf{0} = (0, \ldots, 0)$ of length $c$.
+
+In R, we can zero out by following code
+
+```{r}
+U_to_zero <- matrix(rnorm(10), ncol=2)
+U_to_zero
+
+supervision_F <- matrix(c(1, 0, 0, 1, 0, 0, 1, 0, 0, 0), ncol=2)
+supervision_F
+# observations 3 and 5 are unsupervised
+
+U_to_zero[which(rowSums(supervision_F) == 0), ] <- 0
+U_to_zero
+```
+
+### Final formula
+
+$$
+\Phi^\text{SSFCM} = U + U_\alpha^0.
+$$
+
+
