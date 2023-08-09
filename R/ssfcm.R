@@ -250,4 +250,26 @@ SSFCM <- function(
 
   return(z)
 }
+
+
+#' Title
+#'
+#' @param object
+#' @param newdata
+#'
+#' @return
+#'
+#' @export
+#' @examples
+predict.ssfcm <- function(object, newdata) {
+  output <- estimate_U(
+    X = newdata,
+    V = object$V,
+    F_ = NULL,
+    alpha = NULL,
+    function_dist = object$function_dist,
+    i_indices = NULL
+    )
+  return(output)
 }
+
