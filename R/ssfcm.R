@@ -24,6 +24,7 @@ dheve <- function(A, vertical) {
   return(elements)
 }
 
+
 #' Aggregates elements of DHE and DVE matrices in a step to build
 #' evidence matrix E.
 #' See vignette `vectorized-equations` for details.
@@ -37,6 +38,7 @@ dheve <- function(A, vertical) {
 gamma <- function(dhe, dve) {
   1 / ((dhe/dve) %*% matrix(rep(1, ncol(dhe))))
 }
+
 
 #' Rearranges elements of input matrix from a block matrix with vertical blocks
 #' (column vectors) to a block matrix with horizontal blocks (row vectors).
@@ -52,6 +54,7 @@ gamma <- function(dhe, dve) {
 phi <- function(A, c) {
   matrix(A, ncol=c, byrow=TRUE)
 }
+
 
 #' Calculates data evidence matrix E from distances matrix D.
 #'
@@ -190,15 +193,14 @@ SSFCM <- function(
     alpha=NULL,
     F_=NULL
 ) {
-  # random U if not supplied
   if (is.null(U)) {
     U <- matrix(runif(nrow(X)*C), ncol=C)
   }
 
-  # normalize U
+  # Rows of U should sum up to 1
   U <- t(apply(U, 1, function(x) x / sum(x)))
 
-  # indices for SSFCM
+  # Calculate indices once instead in each loop
   if (is.null(alpha)) {
     i_indices <- NA
   } else {
@@ -207,15 +209,13 @@ SSFCM <- function(
   }
 
   counter = 0
-
-  # calculations loop
   for (iter in 1:max_iter) {
     counter <- counter + 1
     U_previous_iter <- U
 
     Phi <- U_previous_iter^2
 
-    # modify Phi if running SSFCM
+    # Modify `Phi` if running semi-supervised FCM
     if (!is.null(alpha)) {
       U_alpha <- alpha * (U_previous_iter - F_)^2
       U_alpha[h_indices, ] <- 0
