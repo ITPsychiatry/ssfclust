@@ -238,5 +238,16 @@ SSFCM <- function(
       break
     }
   }
-  return(list(U=U, counter=counter))
+
+  z <- list(
+    U = U,
+    V = V,
+    function_dist = function_dist,
+    counter = counter
+  )
+
+  class(z) <- "ssfcm"
+
+  return(z)
+}
 }
