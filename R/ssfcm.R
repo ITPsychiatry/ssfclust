@@ -60,7 +60,7 @@ phi <- function(A, c) {
 #' @return Matrix of size N x c.
 #' @export
 #'
-calculate.evidence <- function(D) {
+calculate_evidence <- function(D) {
   dve <- dheve(D, vertical=TRUE)
   dhe <- dheve(D, vertical=FALSE)
   phi(A=gamma(dhe, dve), c=ncol(dhe))
@@ -81,24 +81,24 @@ calculate.evidence <- function(D) {
 #' @param alpha
 #' the scaling factor, a floating point > 0.
 #'
-#' @param fun.distances
+#' @param function_dist
 #' A function of two arguments: matrices X and V of the same
 #' number of columns.
 #' It should return a matrix of (nrow(X) x nrow(V)) of distances
 #' between each row of X and all rows of V.
 #' In case of Euclidean distance, the result should not be squared!
 #'
-estimate.U <-
+estimate_U <-
   function(
     X,
     V,
     F_,
     alpha,
-    fun.distances,
+    function_dist,
     i_indices
   ) {
-    D <- fun.distances(X, V)^2
-    E <- calculate.evidence(D)
+    D <- function_dist(X, V)^2
+    E <- calculate_evidence(D)
 
     if (is.null(alpha)) {
       return(E)
@@ -122,7 +122,7 @@ estimate.U <-
 #' @return Clusters' prototypes matrix of size c x p.
 #' @export
 #'
-estimate.V <- function(Phi, X) {
+estimate_V <- function(Phi, X) {
   Phi_tilde <- sweep(Phi, 2, colSums(Phi), "/")
   return(t(t(X) %*% Phi_tilde))
 }
@@ -145,7 +145,7 @@ estimate.V <- function(Phi, X) {
 #' Used mainly for reproducibility to compare calculations with other packages
 #' (e.g. in Python).
 #'
-#' @param fun.distances
+#' @param function_dist
 #' A function of two arguments: matrices X and V of the same
 #' number of columns.
 #' It should return a matrix of (nrow(X) x nrow(V)) of distances
@@ -186,7 +186,7 @@ SSFCM <- function(
     U=NULL,
     max_iter=200,
     conv_criterion=1e-4,
-    fun.distances=rdist::cdist,
+    function_dist=rdist::cdist,
     alpha=NULL,
     F_=NULL
 ) {
@@ -222,14 +222,14 @@ SSFCM <- function(
       Phi <- Phi + U_alpha
     }
 
-    V <- estimate.V(Phi, X)
+    V <- estimate_V(Phi, X)
 
-    U <- estimate.U(
+    U <- estimate_U(
       X=X,
       V=V,
       F_=F_,
       alpha=alpha,
-      fun.distances=fun.distances,
+      function_dist=function_dist,
       i_indices=i_indices)
 
     conv_iter <- base::norm(U - U_previous_iter, type="F")
