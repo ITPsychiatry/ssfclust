@@ -10,7 +10,7 @@ SSFCM(
   U = NULL,
   max_iter = 200,
   conv_criterion = 1e-04,
-  fun.distances = rdist::cdist,
+  function_dist = rdist::cdist,
   alpha = NULL,
   F_ = NULL
 )
@@ -24,7 +24,7 @@ SSFCM(
 Used mainly for reproducibility to compare calculations with other packages
 (e.g. in Python).}
 
-\item{fun.distances}{A function of two arguments: matrices X and V of the same
+\item{function_dist}{A function of two arguments: matrices X and V of the same
 number of columns.
 It should return a matrix of (nrow(X) x nrow(V)) of distances
 between each row of X and all rows of V.
