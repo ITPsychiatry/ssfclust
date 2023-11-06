@@ -2,6 +2,7 @@
 
 S3method(predict,ssfcm)
 export(SSFCM)
+export(TFCM)
 export(calculate_evidence)
 export(dheve)
 export(estimate_V)

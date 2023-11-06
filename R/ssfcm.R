@@ -277,7 +277,9 @@ SSFCM <- function(
   return(z)
 }
 
-
+#' Time Fuzzy C-Means
+#'
+#' @export
 TFCM <- function(    # Time Fuzzy C-Means
     X,
     C,
