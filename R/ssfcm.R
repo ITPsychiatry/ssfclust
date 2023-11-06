@@ -116,6 +116,32 @@ estimate_U <-
   }
 
 
+estimate_U_time <-
+  function(
+    X,
+    V,
+    F_,
+    alpha,
+    function_dist,
+    previous_U
+  ) {
+    D <- function_dist(X, V)^2
+    E <- calculate_evidence(D)
+
+    if (is.null(alpha)) {
+      output <- E
+    } else {
+      shifted_previous_U <- rbind(
+        rep(1/ncol(previous_U), ncol(previous_U)),   # TODO prone to roundings!
+        previous_U[-nrow(previous_U), ]
+      )
+      output <- (1/(1+alpha))*E + (alpha/(1+alpha))*shifted_previous_U
+      output[1, ] <- E[1, ]
+    }
+    return(list(U = output, E = E))
+  }
+
+
 #' Equation to calculate clusters' prototypes matrix $\hat{V}$.
 #'
 #' @param Phi Matrix with weights of size N x c.
@@ -242,6 +268,74 @@ SSFCM <- function(
   z <- list(
     U = U,
     V = V,
+    function_dist = function_dist,
+    counter = counter
+  )
+
+  class(z) <- "ssfcm"
+
+  return(z)
+}
+
+
+TFCM <- function(    # Time Fuzzy C-Means
+    X,
+    C,
+    U=NULL,
+    max_iter=200,
+    conv_criterion=1e-4,
+    function_dist=rdist::cdist,
+    alpha=NULL
+) {
+  if (is.null(U)) {
+    U <- matrix(runif(nrow(X)*C), ncol=C)
+  }
+
+  # Rows of U should sum up to 1
+  U <- t(apply(U, 1, function(x) x / sum(x)))
+
+  counter = 0
+  U_history = list()
+  E_history = list()
+  for (iter in 1:max_iter) {
+    counter <- counter + 1
+    U_previous_iter <- U
+    U_history[[counter]] <- U_previous_iter
+
+    Phi <- U_previous_iter^2
+
+    # Modify `Phi` if running semi-supervised FCM
+    # if (!is.null(alpha)) {
+    #   U_alpha <- alpha * (U_previous_iter - F_)^2
+    #   U_alpha[h_indices, ] <- 0
+    #   Phi <- Phi + U_alpha
+    # }
+
+    V <- estimate_V(Phi, X)
+
+    o <- estimate_U_time(
+      X=X,
+      V=V,
+      F_=F_,
+      alpha=alpha,
+      function_dist=function_dist,
+      previous_U=U_previous_iter)
+
+    U <- o$U
+    E_history[[counter]] <- o$E
+
+    conv_iter <- base::norm(U - U_previous_iter, type="F")
+
+    if (conv_iter < conv_criterion) {
+      break
+    }
+  }
+
+  z <- list(
+    U = U,
+    V = V,
+    U_history = U_history,
+    E_history = E_history,
     function_dist = function_dist,
     counter = counter
   )
