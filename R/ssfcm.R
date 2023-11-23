@@ -106,13 +106,7 @@ estimate_U <-
     if (is.null(alpha)) {
       return(E)
     } else {
-      if (length(alpha) == 1) {
-        M <- matrix(1, nrow(F_), ncol(F_))
-        M[i_indices, ] <- 1/(1+alpha)
-      } else {
-        M <- matrix((1 / (1 + alpha)), ncol = 1)[, rep(1, ncol(F_))]
-      }
-
+      M <- matrix((1 / (1 + alpha)), ncol = 1)[, rep(1, ncol(F_))]
       F_alpha = F_*(alpha/(1+alpha))
 
       return(M*E + F_alpha)
