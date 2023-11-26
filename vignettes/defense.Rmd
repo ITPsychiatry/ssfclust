@@ -1,0 +1,510 @@
+---
+title: "defense"
+output: html_document
+date: "2023-11-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ssfclust)
+library(ggplot2)
+library(dplyr)
+library(devtools)
+```
+
+# parameters of the script
+
+```{r}
+set.seed(42)
+# number of data simulations
+X.simulations = 10
+
+# number of supervised observations simulations
+F.simulations = 10
+
+# the length of grid reference for simulations
+ref.length = 50
+```
+
+# auxiliary functions
+
+```{r}
+simulate_data <- function(n) {
+  rbind(
+    matrix(rnorm(2*n, mean=5, sd=sqrt(5)), ncol=2),
+    matrix(rnorm(2*n, mean=7, sd=sqrt(5)), ncol=2),
+    matrix(rnorm(2*n, mean=9, sd=sqrt(5)), ncol=2)
+  )
+}
+
+
+simulate_supervision <- function(n) {
+  F_ <- matrix(0, nrow=3*n, ncol=3)
+
+  F_[sample(1:100, size=15), 1] <- 1.
+  F_[sample(101:200, size=15), 2] <- 1.
+  F_[sample(201:300, size=15), 3] <- 1.
+
+  return(F_)
+}
+
+
+get_supervised <- function(dataM, supervisionM) {
+  mask <- which(supervisionM != 0, arr.ind=TRUE)
+  mask.sorted <- mask[order(mask[, "row"], decreasing=FALSE), ]
+  return(dataM[mask.sorted])
+}
+
+
+results_for_grid <- function(alpha_grid, X, F_) {
+  models <- lapply(
+    alpha_grid,
+    function(x)
+      ssfclust::SSFCM(
+        X=as.matrix(X),
+        C=3,
+        alpha=x,
+        F_=as.matrix(F_)
+      )
+  )
+
+  us <- lapply(models, function(x, y) get_supervised(x$U, y), F_)
+  prototypes <- as.data.frame(do.call(rbind, lapply(models, function(x) x$V)))
+
+  colnames(prototypes) <- c("X1", "X2")
+
+  prototypes$alpha <- rep(alpha_grid, each = 3)
+  prototypes$id <- rep(seq_len(3), length(alpha_grid))
+
+  results <- data.frame(
+    u = unlist(us),
+    alpha = rep(unlist(alpha_grid), each=length(us[[1]]))
+  )
+
+  return(list(prototypes = prototypes, results = results))
+}
+
+
+simulate_for_grid <- function(alpha_grid, Xs, F_s) {
+  outcomes <- list()
+  prototypes <- list()
+
+  for (i in seq_along(Xs)) {
+    for (j in seq_along(F_s[[i]])) {
+      results <- results_for_grid(alpha_grid=alpha_grid,
+                                     X=Xs[[i]],
+                                     F_=F_s[[i]][[j]])
+      outcomes <- append(outcomes, list(results$results))
+      prototypes <- append(prototypes, list(results$prototypes))
+    }
+  }
+
+  outcomes_concat <- do.call(rbind, outcomes)
+  prototypes_concat <- do.call(rbind, prototypes)
+
+  return(list(outcomes_concat = outcomes_concat,
+              prototypes_concat = prototypes_concat))
+}
+
+
+create_summary <- function(df, var) {
+  df %>%
+    group_by(alpha) %>%
+    summarise(
+      n=n(),
+      q1=quantile({{var}}, probs=c(0.25)),
+      me=median({{var}}),
+      q3=quantile({{var}}, probs=c(0.75))
+    )
+}
+
+
+ips <- function(x) {x / (1+x)}
+vips <- function(x) {x / (1-x)}
+
+
+retrieve_evidence <- function(df) {
+  df$ev <- (df$u - ips(df$alpha)) * (1 + df$alpha)
+  return(df)
+}
+
+
+establish_cv_grid <- function(beta, folds = 5){
+  alpha_beta <- beta^(-0.5) - 1
+  step <- ips(alpha_beta) / folds
+  grid_ips <- seq_len(folds) * step
+  grid_alpha <- vips(grid_ips)
+
+  return(grid_alpha)
+}
+```
+
+
+# data and hyperparameters for simulations
+
+```{r}
+Xs <- replicate(X.simulations, simulate_data(100)) |> asplit(3)
+
+F_s <- vector(mode="list", length=X.simulations)
+
+for (i in seq_along(F_s)) {
+  F_s[[i]] <- replicate(F.simulations, simulate_supervision(100)) |> asplit(3)
+}
+
+alphas_B <- list(0.3, 0.5, 0.7, 0.9, 1.)
+alphas_ref <- as.list(seq(0, 3.5, length.out=ref.length))
+
+ips_B <- ips(unlist(alphas_B))
+ips_ref <- ips(unlist(alphas_ref))
+
+# ips_ips <- c(0.155, 0.311, 0.466, 0.621, 0.776)
+# alphas_ips <- as.list(vips(ips_ips))
+
+alphas_ips <- establish_cv_grid(beta = 0.2)
+```
+
+
+# Simulations
+
+## `alphas_ref`
+
+```{r}
+start_time <- Sys.time()
+df_total <- simulate_for_grid(alphas_ref, Xs, F_s)|> retrieve_evidence()
+df_total_ref <- df_total$outcomes_concat
+df_total_ref_v <- df_total$prototypes_concat
+end_time <- Sys.time()
+print(end_time - start_time)
+#write.csv(df_sum_ref, file="../results/ref.csv", row.names=FALSE)
+```
+
+## `alphas_ips` and `alphas_B`
+
+```{r}
+start_time <- Sys.time()
+df_total <- simulate_for_grid(alphas_ips, Xs, F_s) |> retrieve_evidence()
+df_total_ips <- df_total$outcomes_concat
+df_total_ips_v <- df_total$prototypes_concat
+end_time <- Sys.time()
+print(end_time - start_time)
+#write.csv(df_sum_ips, file="../results/ips.csv", row.names=FALSE)
+```
+
+```{r}
+start_time <- Sys.time()
+df_total <- simulate_for_grid(alphas_B, Xs, F_s) |> retrieve_evidence()
+df_total_B <- df_total$outcomes_concat
+df_total_B_v <- df_total$prototypes_concat
+end_time <- Sys.time()
+print(end_time - start_time)
+#write.csv(df_sum_B, file="../results/B.csv", row.names=FALSE)
+```
+
+## summaries
+
+```{r}
+df_sum_ips <- create_summary(df_total_ips, ev)
+df_sum_B <- create_summary(df_total_B, ev)
+df_sum_ref <- create_summary(df_total_ref, ev)
+```
+
+# calculating prototypes closeness - TODO
+
+To be extracted to a function.
+
+```{r}
+true_points <- data.frame(id = c(1, 2 ,3), V1 = c(5, 7, 9), V2 = c(5, 7, 9))
+df <- df_total_ips_v
+basis <- merge(df, true_points, by = "id")
+basis$index <- with(basis, sqrt((X1 - V1)^2 + (X2 - V2)^2))
+
+ggplot(basis, aes(x = group, y = index, fill = as.factor(id))) +
+  geom_boxplot()
+```
+
+
+# read simulations results
+
+```{r}
+ips_results <- df_sum_ips
+ref_results <- df_sum_ref
+B_results <- df_sum_B
+# ips_results <- read.csv("../results/ips.csv")
+# ref_results <- read.csv("../results/ref.csv")
+# B_results <- read.csv("../results/B.csv")
+```
+
+Joint results.
+
+```{r}
+data_for_plot <- do.call(rbind, list(ips_results, ref_results, B_results))
+```
+
+
+# plots for Figure 3
+
+```{r}
+interleave <- function(x) {
+  combined <- c(x, rep("", length(x)))
+  reordered <- combined[order(c(seq_along(x), seq_along(x)))]
+  head(reordered, -1)
+}
+```
+
+## plots on alpha scale
+
+```{r}
+plot.alpha.basis <-
+  ggplot(data=data_for_plot, aes(x=alpha)) +
+  geom_ribbon(aes(x = alpha, ymin = q1, ymax=q3, colour = "grey"), linetype=0, alpha=0.25) +
+  geom_line(aes(y=me), colour="white", alpha=1) +
+  geom_function(fun = ips, linetype="dotted") +
+  theme_bw() +
+  theme(
+    text = element_text(size=6),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    strip.background = element_blank(),
+    legend.position = "none",
+    axis.title.x = element_text(size = 10),
+    axis.title.y = element_text(size = 10),
+    axis.text = element_text(size = 7, colour="black")
+  ) +
+  scale_x_continuous(
+    limits=c(0, 3.5),
+    expand=c(0, 0.05),
+    breaks=seq(0, 3.5, 0.25),
+    labels=interleave(seq(0, 3.5, 0.5))
+  ) +
+  scale_y_continuous(limits=c(0, 1), expand=c(0, 0.01)) +
+  xlab(expression(alpha)) +
+  ylab(expression(paste(bar(u), " (", alpha, ")")))
+
+plot.alpha.B <-
+  plot.alpha.basis +
+  geom_point(data=B_results,
+             aes(x=alpha, y=me),
+             colour="blue",
+             shape=16,
+             size=2)
+
+plot.alpha.ips <-
+  plot.alpha.basis +
+  geom_point(data=ips_results,
+             aes(x=alpha, y=me),
+             colour="#ff8c00",
+             shape=15,
+             size=2)
+```
+
+## plots on ips scale
+
+```{r}
+data_for_plot$ips = ips(data_for_plot$alpha)
+
+plot.ips.basis <-
+  ggplot(data=data_for_plot, aes(x=ips)) +
+  geom_ribbon(aes(x = ips, ymin = q1, ymax=q3, colour = "grey"), linetype=0, alpha=0.25) +
+  geom_line(aes(y=me), colour="white", alpha=1) +
+  geom_function(fun = function(x) {x}, linetype="dotted") +
+  theme_bw() +
+  theme(
+    text = element_text(size=6),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    strip.background = element_blank(),
+    legend.position = "none",
+    axis.title.x = element_text(size = 10),
+    axis.title.y = element_text(size = 10),
+    axis.text = element_text(size = 7, colour="black")
+  ) +
+  scale_x_continuous(
+    limits=c(0, 0.8),
+    expand=c(0, 0.01),
+    breaks=seq(0, 0.8, 0.1)
+  ) +
+  scale_y_continuous(limits=c(0, 1), expand=c(0, 0.01)) +
+  xlab(expression(paste("IPS(", alpha, ") = ", alpha, " / (", 1 + alpha, ")"))) +
+  ylab(expression(paste(bar(u), " (", alpha, ")")))
+
+
+plot.ips.B <-
+  plot.ips.basis +
+  geom_point(data=B_results %>% mutate(ips = ips(alpha)),
+             aes(x=ips, y=me),
+             colour="blue",
+             shape=16,
+             size=2)
+
+
+plot.ips.ips <-
+  plot.ips.basis +
+  geom_point(data=ips_results %>% mutate(ips = ips(alpha)),
+             aes(x=ips, y=me),
+             #colour="orange",
+             colour="#ff8c00",
+             shape=15,
+             size=2)
+```
+
+## saving results (optionary)
+
+```{r}
+# save results
+
+save_plots <- list(plot.alpha.ips, plot.ips.ips, plot.alpha.B, plot.ips.B)
+save_names <- paste0("kmita3", c("a", "b", "c", "d"), ".pdf")
+
+for (idx in seq_along(save_names)) {
+  #ggsave(filename=paste0("../results/", save_names[[idx]]),
+  ggsave(filename=paste0("./results/", save_names[[idx]]),
+         plot=save_plots[[idx]],
+         width=3.5,
+         height=2,
+         dpi=300,
+         units="in")
+}
+```
+
+
+#data for Table II
+
+```{r}
+ips_me_delta <-
+  ips_results %>%
+  select(alpha, me) %>%
+  round(2) %>%
+  mutate(delta = me - lag(me), source="ips")
+
+B_me_delta <-
+  B_results %>%
+  select(alpha, me) %>%
+  round(2) %>%
+  mutate(delta = me - lag(me), source="B")
+```
+
+Saving results.
+
+```{r}
+#write.csv(rbind(ips_me_delta, B_me_delta), file="../results/table.csv", row.names=FALSE)
+#write.csv(rbind(ips_me_delta, B_me_delta), file="./results/table.csv", row.names=FALSE)
+```
+
+
+# plot for Figure 2
+
+```{r}
+clusters_example <-
+  ggplot(
+    data=data.frame(
+      x1=Xs[[1]][,1],
+      x2=Xs[[1]][,2],
+      y=as.factor(rep(c(1, 2, 3), each=100))
+    ),
+    aes(x=x1, y=x2)) +
+  #geom_point(aes(shape=y, colour=y), alpha=0.8, size=1, stroke=rep(c(1, 1.15, 1), each=100)) +
+  geom_point(aes(shape=y, colour=y), alpha=0.8, size=1) +
+  scale_shape_manual(values=c(17, 4, 16))+
+  #scale_color_manual(values=c("#1B9E77", "#D95F02", "#7570B3"))+
+  theme_bw() +
+  theme(
+    text = element_text(size=6),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    strip.background = element_blank(),
+    legend.position = "none",
+    axis.title.x = element_text(size = 10),
+    axis.title.y = element_text(size = 10),
+    axis.text = element_text(size = 7, colour="black")
+  ) +
+  scale_x_continuous(
+    limits=c(-2, 17),
+    expand=c(0, 0.01),
+    breaks=seq(-2, 17, 1),
+    labels=c("-2", "", "0",
+             rep("", 4), "5", rep("", 4), "10", rep("", 4),
+             "15", "", "17")
+  ) +
+  scale_y_continuous(
+    limits=c(0, 17),
+    expand=c(0, 0.01),
+    breaks=0:17,
+    labels=c("0", rep("", 4), "5", rep("", 4), "10", rep("", 4), "15", "", "17")
+  ) +
+  xlab(expression(X[1])) +
+  ylab(expression(X[2]))
+
+#ggsave(filename="../results/kmita2.pdf",
+ggsave(filename="./results/kmita2.pdf",
+       plot=clusters_example,
+       width=3.5,
+       height=2.5,
+       dpi=450,
+       units="in")
+```
+
+
+# plot for Figure 1
+
+
+```{r}
+functions_to_apply_names <- c(
+  "ips.ssfcm", "ips.ssfcm.prime", "ips.sspcm", "ips.sspcm.prime"
+)
+
+functions_to_apply <- list(
+  function(x) {x / (1+x)},
+  function(x) {1 / ( (1+x)^2 )},
+  function(x) {x / ( 2*(2+x) )},
+  function(x) {1 / ( (2+x)^2 )}
+)
+
+data_for_ips_models_plot <- data.frame(
+  alpha=rep(seq(0, 5, length.out=100), 4),
+  y=unlist(
+    lapply(functions_to_apply, function(x) x(seq(0, 5, length.out=100)))
+  ),
+  group1=rep(c("ssfcm", "sspcm"), each=200),
+  group2=rep(functions_to_apply_names, each=100)
+)
+
+ips_for_models <-
+  ggplot(data_for_ips_models_plot,
+         aes(x=alpha, y=y, colour=group1, linetype=group2)) +
+  geom_line() +
+  scale_linetype_manual(
+    name="X",
+    values = c("solid","dotted", "longdash", "dotdash"),
+    labels=c("Low", "5","High", "c"),
+    guide="none"
+  ) +
+  scale_color_manual(name ="",
+                     values = c("#377eb8", "#e41a1c"),
+                     labels=c("SSFCM", "SSPCM")) +
+  theme_bw() +
+  theme(
+    text = element_text(size=6),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    strip.background = element_blank(),
+    legend.position = c(0.8, 0.55),
+    legend.text = element_text(size=8),
+    legend.title = element_blank(),
+    legend.margin = margin(c(1, 1, 1, 1)),
+    axis.title.x = element_text(size = 10),
+    axis.title.y = element_text(size = 8),
+    axis.text = element_text(size = 7, colour="black")
+  ) +
+  xlab(expression(alpha)) +
+  ylab("value of a respective function") +
+  scale_x_continuous(limits=c(0, 5), expand=c(0, 0.1)) +
+  scale_y_continuous(limits=c(0, 1), expand=c(0, 0.1))
+
+ggsave(filename="./results/kmita1.pdf",
+       plot=ips_for_models,
+       width=3.5,
+       height=2.5,
+       dpi=450,
+       units="in")
+```
