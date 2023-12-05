@@ -98,14 +98,20 @@ estimate_U <-
     F_,
     alpha,
     function_dist,
-    i_indices
+    i_indices,
+    kernel = FALSE
   ) {
-    D <- function_dist(X, V)^2
+    if (kernel) {
+      D <- 1 - function_dist(X, V)
+    } else {
+      D <- function_dist(X, V)^2
+    }
     E <- calculate_evidence(D)
 
     if (is.null(alpha)) {
       return(E)
     } else {
+      # TODO BUG! THIS REQUIRES ALPHA TO BE VECTOR WITH ZERO ENTRIES FOR bj=0
       M <- matrix((1 / (1 + alpha)), ncol = 1)[, rep(1, ncol(F_))]
       F_alpha = F_*(alpha/(1+alpha))
 
@@ -189,7 +195,8 @@ SSFCM <- function(
     conv_criterion=1e-4,
     function_dist=rdist::cdist,
     alpha=NULL,
-    F_=NULL
+    F_=NULL,
+    kernel = FALSE
 ) {
   if (is.null(U)) {
     U <- matrix(runif(nrow(X)*C), ncol=C)
@@ -218,6 +225,10 @@ SSFCM <- function(
       U_alpha <- alpha * (U_previous_iter - F_)^2
       U_alpha[h_indices, ] <- 0
       Phi <- Phi + U_alpha
+
+      if ((kernel) & (counter > 1)) {
+        Phi <- Phi + function_dist(X, V)
+      }
     }
 
     V <- estimate_V(Phi, X)
@@ -228,7 +239,8 @@ SSFCM <- function(
       F_=F_,
       alpha=alpha,
       function_dist=function_dist,
-      i_indices=i_indices)
+      i_indices=i_indices,
+      kernel = kernel)
 
     conv_iter <- base::norm(U - U_previous_iter, type="F")
 
