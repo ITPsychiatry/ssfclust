@@ -253,7 +253,8 @@ SSFCM <- function(
     U = U,
     V = V,
     function_dist = function_dist,
-    counter = counter
+    counter = counter,
+    kernel = kernel
   )
 
   class(z) <- "ssfcm"
@@ -278,7 +279,8 @@ predict.ssfcm <- function(object, newdata) {
     F_ = NULL,
     alpha = NULL,
     function_dist = object$function_dist,
-    i_indices = NULL
+    i_indices = NULL,
+    kernel = object$kernel
     )
   return(output)
 }
