@@ -10,7 +10,7 @@ SSFCM(
   U = NULL,
   max_iter = 200,
   conv_criterion = 1e-04,
-  fun.distances = rdist::cdist,
+  function_dist = rdist::cdist,
   alpha = NULL,
   F_ = NULL
 )
@@ -24,7 +24,7 @@ SSFCM(
 Used mainly for reproducibility to compare calculations with other packages
 (e.g. in Python).}
 
-\item{fun.distances}{A function of two arguments: matrices X and V of the same
+\item{function_dist}{A function of two arguments: matrices X and V of the same
 number of columns.
 It should return a matrix of (nrow(X) x nrow(V)) of distances
 between each row of X and all rows of V.
@@ -52,10 +52,10 @@ F_[sample(1:50, 10), 1] <- 1
 F_[sample(51:100, 10), 2] <- 1
 
 model <- SSFCM(X=X, C=2)
-model.ss <- SSFCM(X=X, C=2, alpha=1, F_=F_)
+model_ss <- SSFCM(X=X, C=2, alpha=1, F_=F_)
 
-acc.unsupervised.1 <- sum(apply(model$U, 1, which.max) == c(rep(1, 50), rep(2, 50)))
-acc.unsupervised.2 <- sum(apply(model$U, 1, which.max) == c(rep(2, 50), rep(1, 50)))
-acc.supervised <- sum(apply(model.ss$U, 1, which.max) == c(rep(1, 50), rep(2, 50)))
+acc_unsupervised_1 <- sum(apply(model$U, 1, which.max) == c(rep(1, 50), rep(2, 50)))
+acc_unsupervised_2 <- sum(apply(model$U, 1, which.max) == c(rep(2, 50), rep(1, 50)))
+acc_supervised <- sum(apply(model_ss$U, 1, which.max) == c(rep(1, 50), rep(2, 50)))
 
 }
