@@ -114,6 +114,106 @@ estimate_U <-
   }
 
 
+estimate_U_ALT <-
+  function(
+    X,
+    V,
+    F_,
+    alpha,
+    function_dist,
+    i_indices
+  ) {
+    A <- matrix(alpha, ncol = 1)[, rep(1, ncol(F_))]
+
+    D <- function_dist(X, V)^2
+    E <- calculate_evidence(D+A)
+
+    if (is.null(alpha)) {
+      return(E)
+    } else {
+      superF_dummy <- create_dummy_superF(F_)
+      DSI <- matrix(get_supervised(D, superF_dummy),
+                    ncol = 1)[, rep(1, ncol(F_))]
+
+      F_alpha <- A / (DSI + A)
+      M <- 1 - F_alpha
+
+      return(M*E + F_alpha * F_)
+    }
+  }
+
+
+get_supervised <- function(dataM, supervisionM) {
+  mask <- which(supervisionM != 0, arr.ind=TRUE)
+  mask.sorted <- mask[order(mask[, "row"], decreasing=FALSE), ]
+  return(dataM[mask.sorted])
+}
+
+
+create_dummy_superF <- function(superF) {
+  superF_dummy <- superF
+  h_indices <- which(rowSums(superF_dummy) == 0)
+  dummy_fill <- c(rep(0, ncol(superF) - 1), 1)
+  superF_dummy[h_indices, ] <- dummy_fill
+
+  return(superF_dummy)
+}
+
+
+#' Indices (row, column) of matrix cells other than `i,s(i)`.
+#'
+#' @param supervisionM F matrix
+#'
+#' @return dataframe with `row, col` columns.
+#' @export
+#'
+#' @examples
+#' F_ <- matrix(c(0, 0, 0, 1, 1, 0), nrow = 3, byrow = TRUE)
+#' indices_to_zero_out <- get_non_isi_matrix_cells(B)
+#'
+get_non_isi_matrix_cells <- function(supervisionM) {
+  mask <- which(supervisionM == 0, arr.ind = TRUE)
+  mask_sorted <- mask[order(mask[, "row"], decreasing = FALSE), ]
+  return(mask_sorted)
+}
+
+
+#' @export
+estimate_T <-
+  function(
+    X,
+    V,
+    F_,
+    alpha,
+    function_dist,
+    i_indices,
+    gammas  # vector
+  ) {
+    D <- function_dist(X, V)^2
+    # gammas_matrix <- structure(gammas, dim = c(1, ncol(F_)))[rep(1, nrow(F_)), ]
+    gammas_matrix <- structure(gammas, dim = c(1, ncol(D)))[rep(1, nrow(D)), ]
+
+    if (is.null(alpha)) {
+      Tm <- gammas_matrix / (gammas_matrix + D)
+    } else {
+      nominator_step_1 <- alpha*D
+      mask_non_isi <- get_non_isi_matrix_cells(F_)
+      nominator_step_1[mask_non_isi] <- 0
+      nominator_step_2 <- gammas_matrix + nominator_step_1
+
+      # denominator_step_1 <- matrix(alpha, nrow = nrow(F_), ncol = ncol(F_))
+      # denominator_step_1[i_indices, ] <- alpha + 1
+      denominator_step_1 <- matrix((alpha + 1), ncol = 1)[, rep(1, ncol(F_))]
+      denominator_step_2 <- denominator_step_1*D
+      denominator_step_3 <- gammas_matrix + denominator_step_2
+
+      Tm <- denominator_step_2 / denominator_step_3
+    }
+
+    return(Tm)
+  }
+
+
 #' Equation to calculate clusters' prototypes matrix $\hat{V}$.
 #'
 #' @param Phi Matrix with weights of size N x c.
@@ -184,12 +284,14 @@ estimate_V <- function(Phi, X) {
 SSFCM <- function(
     X,
     C,
-    U=NULL,
-    max_iter=200,
-    conv_criterion=1e-4,
-    function_dist=rdist::cdist,
-    alpha=NULL,
-    F_=NULL
+    U = NULL,
+    max_iter = 200,
+    conv_criterion = 1e-4,
+    function_dist = rdist::cdist,
+    alpha = NULL,
+    F_ = NULL,
+    prototypes = TRUE,
+    alt = FALSE
 ) {
   if (is.null(U)) {
     U <- matrix(runif(nrow(X)*C), ncol=C)
@@ -207,6 +309,10 @@ SSFCM <- function(
   }
 
   counter = 0
+  U_history <- list()
+  V_history <- list()
+  Phi_history <- list()
+
   for (iter in 1:max_iter) {
     counter <- counter + 1
     U_previous_iter <- U
@@ -214,21 +320,37 @@ SSFCM <- function(
     Phi <- U_previous_iter^2
 
     # Modify `Phi` if running semi-supervised FCM
-    if (!is.null(alpha)) {
+    if (!is.null(alpha) && prototypes) {
       U_alpha <- alpha * (U_previous_iter - F_)^2
       U_alpha[h_indices, ] <- 0
       Phi <- Phi + U_alpha
     }
 
+    Phi_history[[counter]] <- Phi
+
     V <- estimate_V(Phi, X)
 
-    U <- estimate_U(
-      X=X,
-      V=V,
-      F_=F_,
-      alpha=alpha,
-      function_dist=function_dist,
-      i_indices=i_indices)
+    V_history[[counter]] <- V
+
+    if (alt) {
+      U <- estimate_U_ALT(
+        X=X,
+        V=V,
+        F_=F_,
+        alpha=alpha,
+        function_dist=function_dist,
+        i_indices=i_indices)
+    } else {
+      U <- estimate_U(
+        X=X,
+        V=V,
+        F_=F_,
+        alpha=alpha,
+        function_dist=function_dist,
+        i_indices=i_indices)
+    }
+
+    U_history[[counter]] <- U
 
     conv_iter <- base::norm(U - U_previous_iter, type="F")
 
@@ -241,10 +363,107 @@ SSFCM <- function(
     U = U,
     V = V,
     function_dist = function_dist,
-    counter = counter
+    counter = counter,
+    V_history = V_history,
+    U_history = U_history,
+    Phi_history = Phi_history
   )
 
   class(z) <- "ssfcm"
+
+  return(z)
+}
+
+
+
+#' @export
+SSPCM <- function(
+    X,
+    C,
+    U = NULL,
+    gammas = NULL,
+    max_iter = 200,
+    conv_criterion = 1e-4,
+    function_dist = rdist::cdist,
+    alpha = NULL,
+    F_ = NULL
+) {
+  if (is.null(U)) {
+    Tm <- matrix(runif(nrow(X)*C), ncol=C)
+  } else{
+    Tm <- U
+  }
+
+  # Rows of U should sum up to 1
+  Tm <- t(apply(Tm, 1, function(x) x / sum(x)))
+
+  if (is.null(gammas)) {
+    gammas <- rep(1, C)
+  }
+
+  # Calculate indices once instead in each loop
+  if (is.null(alpha)) {
+    i_indices <- NA
+  } else {
+    i_indices <- which(rowSums(F_) != 0)
+    h_indices <- which(rowSums(F_) == 0)
+  }
+
+  counter = 0
+  U_history <- list()
+  V_history <- list()
+  Phi_history <- list()
+
+  for (iter in 1:max_iter) {
+    counter <- counter + 1
+    Tm_previous_iter <- Tm
+
+    Phi <- Tm_previous_iter^2
+
+    # Modify `Phi` if running semi-supervised PCM
+    if (!is.null(alpha)) {
+      Tm_alpha <- alpha * (Tm_previous_iter - F_)^2
+      Tm_alpha[h_indices, ] <- 0
+      Phi <- Phi + Tm_alpha
+    }
+
+    Phi_history[[counter]] <- Phi
+
+    V <- estimate_V(Phi, X)
+
+    V_history[[counter]] <- V
+
+    Tm <- estimate_T(
+      X = X,
+      V = V,
+      F_ = F_,
+      alpha = alpha,
+      function_dist = function_dist,
+      i_indices = i_indices,
+      gammas = gammas
+    )
+
+    U_history[[counter]] <- Tm
+
+    conv_iter <- base::norm(Tm - Tm_previous_iter, type="F")
+
+    if (conv_iter < conv_criterion) {
+      break
+    }
+  }
+
+  z <- list(
+    Tm = Tm,
+    V = V,
+    function_dist = function_dist,
+    counter = counter,
+    gammas = gammas,
+    V_history = V_history,
+    U_history = U_history,
+    Phi_history = Phi_history
+  )
+
+  class(z) <- "sspcm"
 
   return(z)
 }
@@ -267,7 +486,29 @@ predict.ssfcm <- function(object, newdata) {
     alpha = NULL,
     function_dist = object$function_dist,
     i_indices = NULL
-    )
+  )
   return(output)
 }
 
+
+#' Title
+#'
+#' @param object
+#' @param newdata
+#'
+#' @return
+#'
+#' @export
+#' @examples
+predict.sspcm <- function(object, newdata) {
+  output <- estimate_Tm(
+    X = newdata,
+    V = object$V,
+    F_ = NULL,
+    alpha = NULL,
+    function_dist = object$function_dist,
+    i_indices = NULL,
+    gammas = object$gammas
+  )
+  return(output)
+}
